@@ -12,22 +12,21 @@ object PingTable : Table("ping") {
     override val primaryKey = PrimaryKey(id)
 }
 
-fun Application.configureDatabases() {
-    val url = environment.config.property("postgres.url").getString()
-    val user = environment.config.property("postgres.user").getString()
-    val password = environment.config.property("postgres.password").getString()
-
-    Database.connect(
-        url = url,
-        driver = "org.postgresql.Driver",
-        user = user,
-        password = password
-    )
-
-    // 启动时自动建表
-    transaction {
-        SchemaUtils.createMissingTablesAndColumns(PingTable)
+fun Application.configureDatabases(testDb: Database? = null) {
+    val database = testDb ?: run {
+        val url = environment.config.property("postgres.url").getString()
+        val user = environment.config.property("postgres.user").getString()
+        val password = environment.config.property("postgres.password").getString()
+        Database.connect(
+            url = url,
+            driver = "org.postgresql.Driver",
+            user = user,
+            password = password
+        ).also { log.info("Database connected: $url") }
     }
 
-    log.info("Database connected: $url")
+    // 启动时自动建表
+    transaction(database) {
+        SchemaUtils.createMissingTablesAndColumns(PingTable)
+    }
 }
