@@ -12,6 +12,18 @@ object PingTable : Table("ping") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// 云端备份表：存储客户端上传的 BackupPayload JSON
+object CloudBackupTable : Table("cloud_backups") {
+    val id = integer("id").autoIncrement()
+    val deviceId = varchar("device_id", 128)
+    val backupJson = text("backup_json")
+    val exportedAt = varchar("exported_at", 64)
+    val taskCount = integer("task_count")
+    val sizeBytes = integer("size_bytes")
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 fun Application.configureDatabases(testDb: Database? = null) {
     val database = testDb ?: run {
         val url = environment.config.property("postgres.url").getString()
@@ -27,6 +39,6 @@ fun Application.configureDatabases(testDb: Database? = null) {
 
     // 启动时自动建表
     transaction(database) {
-        SchemaUtils.createMissingTablesAndColumns(PingTable)
+        SchemaUtils.createMissingTablesAndColumns(PingTable, CloudBackupTable)
     }
 }

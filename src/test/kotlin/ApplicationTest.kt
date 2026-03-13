@@ -13,6 +13,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
 
 class ApplicationTest {
 
@@ -146,6 +147,138 @@ class ApplicationTest {
         val response = client.get("/ping")
         val json = Json.parseToJsonElement(response.bodyAsText()).jsonArray
         assertEquals(10, json.size, "should only return 10 records")
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /backup/upload
+    // -----------------------------------------------------------------------
+
+    private val sampleBackupJson = """{"schemaVersion":1,"exportedAt":"2026-03-13T10:00:00","tasks":[{"id":1,"title":"test","subject":"math","estimatedMinutes":30,"repeatRuleType":"NONE","repeatRuleDays":null,"date":"2026-03-13","deadlineAt":null,"templateType":null,"status":"ACTIVE","description":""}],"checkIns":[],"mushroomLedger":[],"deductionConfigs":[],"deductionRecords":[],"rewards":[],"rewardExchanges":[],"milestones":[],"scoringRules":[],"keyDates":[]}"""
+
+    @Test
+    fun `upload backup returns 201 with id`() = testApplication {
+        setupTestApp()
+        val response = client.post("/backup/upload") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"deviceId":"test-device","backup":$sampleBackupJson}""")
+        }
+        assertEquals(HttpStatusCode.Created, response.status)
+        val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertNotNull(json["id"], "response should contain id")
+        assertNotNull(json["createdAt"], "response should contain createdAt")
+        assertEquals("2026-03-13T10:00:00", json["exportedAt"]?.jsonPrimitive?.content)
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /backup/list
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `list backups returns empty for unknown device`() = testApplication {
+        setupTestApp()
+        val response = client.get("/backup/list?deviceId=nonexistent")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val json = Json.parseToJsonElement(response.bodyAsText()).jsonArray
+        assertEquals(0, json.size)
+    }
+
+    @Test
+    fun `list backups requires deviceId parameter`() = testApplication {
+        setupTestApp()
+        val response = client.get("/backup/list")
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `upload then list returns one backup with correct summary`() = testApplication {
+        setupTestApp()
+        client.post("/backup/upload") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"deviceId":"dev-1","backup":$sampleBackupJson}""")
+        }
+        val response = client.get("/backup/list?deviceId=dev-1")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val json = Json.parseToJsonElement(response.bodyAsText()).jsonArray
+        assertEquals(1, json.size)
+        val summary = json[0].jsonObject
+        assertEquals(1, summary["taskCount"]?.jsonPrimitive?.content?.toInt())
+        assertEquals("2026-03-13T10:00:00", summary["exportedAt"]?.jsonPrimitive?.content)
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /backup/{id}/download
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `download backup returns full payload`() = testApplication {
+        setupTestApp()
+        val uploadResp = client.post("/backup/upload") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"deviceId":"dev-2","backup":$sampleBackupJson}""")
+        }
+        val uploadJson = Json.parseToJsonElement(uploadResp.bodyAsText()).jsonObject
+        val id = uploadJson["id"]?.jsonPrimitive?.content
+
+        val response = client.get("/backup/$id/download")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("dev-2", json["deviceId"]?.jsonPrimitive?.content)
+        val backup = json["backup"]?.jsonObject
+        assertNotNull(backup, "response should contain backup object")
+        assertEquals(1, backup["schemaVersion"]?.jsonPrimitive?.content?.toInt())
+    }
+
+    @Test
+    fun `download nonexistent backup returns 404`() = testApplication {
+        setupTestApp()
+        val response = client.get("/backup/99999/download")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    // -----------------------------------------------------------------------
+    // DELETE /backup/{id}
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `delete backup removes it`() = testApplication {
+        setupTestApp()
+        val uploadResp = client.post("/backup/upload") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"deviceId":"dev-3","backup":$sampleBackupJson}""")
+        }
+        val id = Json.parseToJsonElement(uploadResp.bodyAsText()).jsonObject["id"]?.jsonPrimitive?.content
+
+        val deleteResp = client.delete("/backup/$id")
+        assertEquals(HttpStatusCode.OK, deleteResp.status)
+
+        val listResp = client.get("/backup/list?deviceId=dev-3")
+        val list = Json.parseToJsonElement(listResp.bodyAsText()).jsonArray
+        assertEquals(0, list.size, "backup should be gone after delete")
+    }
+
+    @Test
+    fun `delete nonexistent backup returns 404`() = testApplication {
+        setupTestApp()
+        val response = client.delete("/backup/99999")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    // -----------------------------------------------------------------------
+    // 5-backup limit per device
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `upload enforces 5 backup limit per device`() = testApplication {
+        setupTestApp()
+        repeat(6) {
+            client.post("/backup/upload") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"deviceId":"dev-limit","backup":$sampleBackupJson}""")
+            }
+        }
+        val response = client.get("/backup/list?deviceId=dev-limit")
+        val list = Json.parseToJsonElement(response.bodyAsText()).jsonArray
+        assertEquals(5, list.size, "should keep at most 5 backups per device")
     }
 }
 
