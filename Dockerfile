@@ -14,8 +14,8 @@ RUN addgroup -g 1000 mushroom && \
     adduser -D -u 1000 -G mushroom mushroom && \
     chown -R mushroom:mushroom /app
 
-# Copy default application.yaml
-COPY src/main/resources/application.yaml /app/application.yaml
+# Copy production config template (application.yaml is in .gitignore)
+COPY src/main/resources/application-production.yaml /app/application.yaml
 RUN chown mushroom:mushroom /app/application.yaml
 
 USER mushroom
