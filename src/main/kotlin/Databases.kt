@@ -46,6 +46,32 @@ object CloudBackupTable : Table("cloud_backups") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// 排行榜表：每用户每游戏类型只保留最高分
+object LeaderboardTable : Table("leaderboard") {
+    val id = integer("id").autoIncrement()
+    val userId = integer("user_id").references(UsersTable.id)
+    val nickname = varchar("nickname", 32)
+    val gameType = varchar("game_type", 32)
+    val score = integer("score")
+    val createdAt = long("created_at")
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+// 好友关系表
+object FriendsTable : Table("friends") {
+    val id = integer("id").autoIncrement()
+    val userId = integer("user_id").references(UsersTable.id)
+    val friendId = integer("friend_id").references(UsersTable.id)
+    val status = varchar("status", 16) // "pending" / "accepted"
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex(userId, friendId)
+    }
+}
+
 fun Application.configureDatabases(testDb: Database? = null) {
     val database = testDb ?: run {
         val url = environment.config.property("postgres.url").getString()
@@ -61,6 +87,6 @@ fun Application.configureDatabases(testDb: Database? = null) {
 
     // 启动时自动建表
     transaction(database) {
-        SchemaUtils.createMissingTablesAndColumns(PingTable, UsersTable, RefreshTokensTable, CloudBackupTable)
+        SchemaUtils.createMissingTablesAndColumns(PingTable, UsersTable, RefreshTokensTable, CloudBackupTable, LeaderboardTable, FriendsTable)
     }
 }

@@ -24,13 +24,14 @@ data class SendCodeRequest(val phone: String)
 data class SendCodeResponse(val success: Boolean, val message: String)
 
 @Serializable
-data class LoginRequest(val phone: String, val code: String, val deviceId: String)
+data class LoginRequest(val phone: String, val code: String, val deviceId: String, val nickname: String? = null)
 
 @Serializable
 data class LoginResponse(
     val accessToken: String,
     val refreshToken: String,
-    val user: UserProfile
+    val user: UserProfile,
+    val isNewUser: Boolean = false
 )
 
 @Serializable
@@ -116,27 +117,31 @@ fun Application.configureAuthRoutes() {
                     return@post
                 }
 
-                val user = transaction {
+                val (user, isNewUser) = transaction {
                     val existing = UsersTable.selectAll()
                         .where { UsersTable.phone eq req.phone }
                         .firstOrNull()
                     if (existing != null) {
-                        UserProfile(
+                        Pair(UserProfile(
                             id = existing[UsersTable.id],
                             phone = existing[UsersTable.phone],
                             nickname = existing[UsersTable.nickname],
-                            avatarUrl = existing[UsersTable.avatarUrl]
-                        )
+                            avatarUrl = existing[UsersTable.avatarUrl],
+                            friendCode = existing[UsersTable.friendCode]
+                        ), false)
                     } else {
                         val now = System.currentTimeMillis()
+                        val displayName = req.nickname?.takeIf { it.isNotBlank() } ?: "蘑菇冒险家"
+                        val code = generateUniqueFriendCode()
                         val id = UsersTable.insert {
                             it[phone] = req.phone
-                            it[nickname] = "蘑菇冒险家"
+                            it[nickname] = displayName
                             it[avatarUrl] = ""
+                            it[friendCode] = code
                             it[createdAt] = now
                             it[updatedAt] = now
                         } get UsersTable.id
-                        UserProfile(id = id, phone = req.phone, nickname = "蘑菇冒险家", avatarUrl = "")
+                        Pair(UserProfile(id = id, phone = req.phone, nickname = displayName, avatarUrl = "", friendCode = code), true)
                     }
                 }
 
@@ -159,7 +164,7 @@ fun Application.configureAuthRoutes() {
                     }
                 }
 
-                call.respond(LoginResponse(accessToken, refreshTokenStr, user))
+                call.respond(LoginResponse(accessToken, refreshTokenStr, user, isNewUser))
             }
 
             // POST /auth/refresh
@@ -207,7 +212,8 @@ fun Application.configureAuthRoutes() {
                                 id = row[UsersTable.id],
                                 phone = row[UsersTable.phone],
                                 nickname = row[UsersTable.nickname],
-                                avatarUrl = row[UsersTable.avatarUrl]
+                                avatarUrl = row[UsersTable.avatarUrl],
+                                friendCode = row[UsersTable.friendCode]
                             )
                         )
                     }
@@ -232,7 +238,8 @@ fun Application.configureAuthRoutes() {
                             id = updated[UsersTable.id],
                             phone = updated[UsersTable.phone],
                             nickname = updated[UsersTable.nickname],
-                            avatarUrl = updated[UsersTable.avatarUrl]
+                            avatarUrl = updated[UsersTable.avatarUrl],
+                            friendCode = updated[UsersTable.friendCode]
                         )
                     )
                 }

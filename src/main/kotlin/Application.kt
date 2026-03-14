@@ -12,4 +12,6 @@ fun Application.module() {
     configureAuth()
     configureRouting()
     configureAuthRoutes()
+    configureLeaderboardRoutes()
+    configureFriendRoutes()
 }
