@@ -1,0 +1,25 @@
+# Build artifacts (但保留 build/libs 用于 Docker 构建)
+.gradle/
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Runtime
+logs/
+*.log
+
+# Test reports
+test-results/
