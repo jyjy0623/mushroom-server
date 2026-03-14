@@ -126,22 +126,19 @@ fun Application.configureAuthRoutes() {
                             id = existing[UsersTable.id],
                             phone = existing[UsersTable.phone],
                             nickname = existing[UsersTable.nickname],
-                            avatarUrl = existing[UsersTable.avatarUrl],
-                            friendCode = existing[UsersTable.friendCode]
+                            avatarUrl = existing[UsersTable.avatarUrl]
                         ), false)
                     } else {
                         val now = System.currentTimeMillis()
                         val displayName = req.nickname?.takeIf { it.isNotBlank() } ?: "蘑菇冒险家"
-                        val code = generateUniqueFriendCode()
                         val id = UsersTable.insert {
                             it[phone] = req.phone
                             it[nickname] = displayName
                             it[avatarUrl] = ""
-                            it[friendCode] = code
                             it[createdAt] = now
                             it[updatedAt] = now
                         } get UsersTable.id
-                        Pair(UserProfile(id = id, phone = req.phone, nickname = displayName, avatarUrl = "", friendCode = code), true)
+                        Pair(UserProfile(id = id, phone = req.phone, nickname = displayName, avatarUrl = ""), true)
                     }
                 }
 
@@ -212,8 +209,7 @@ fun Application.configureAuthRoutes() {
                                 id = row[UsersTable.id],
                                 phone = row[UsersTable.phone],
                                 nickname = row[UsersTable.nickname],
-                                avatarUrl = row[UsersTable.avatarUrl],
-                                friendCode = row[UsersTable.friendCode]
+                                avatarUrl = row[UsersTable.avatarUrl]
                             )
                         )
                     }
@@ -238,8 +234,7 @@ fun Application.configureAuthRoutes() {
                             id = updated[UsersTable.id],
                             phone = updated[UsersTable.phone],
                             nickname = updated[UsersTable.nickname],
-                            avatarUrl = updated[UsersTable.avatarUrl],
-                            friendCode = updated[UsersTable.friendCode]
+                            avatarUrl = updated[UsersTable.avatarUrl]
                         )
                     )
                 }
