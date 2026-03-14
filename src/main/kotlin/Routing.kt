@@ -2,6 +2,7 @@ package com.mushroom
 
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.http.content.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -16,6 +17,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.io.File
 
 @Serializable
 data class PingRequest(val message: String)
@@ -61,6 +63,9 @@ data class CloudBackupDownloadResponse(
 
 fun Application.configureRouting() {
     routing {
+
+        // 静态文件服务：头像上传目录
+        staticFiles("/uploads/avatars", File("uploads/avatars"))
 
         // 健康检查
         get("/health") {
