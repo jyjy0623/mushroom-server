@@ -12,6 +12,28 @@ object PingTable : Table("ping") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// 用户表
+object UsersTable : Table("users") {
+    val id = integer("id").autoIncrement()
+    val phone = varchar("phone", 20).uniqueIndex()
+    val nickname = varchar("nickname", 32).default("")
+    val avatarUrl = varchar("avatar_url", 512).default("")
+    val createdAt = long("created_at")
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+// 刷新令牌表
+object RefreshTokensTable : Table("refresh_tokens") {
+    val id = integer("id").autoIncrement()
+    val userId = integer("user_id").references(UsersTable.id)
+    val token = varchar("token", 512).uniqueIndex()
+    val deviceId = varchar("device_id", 128)
+    val expiresAt = long("expires_at")
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 // 云端备份表：存储客户端上传的 BackupPayload JSON
 object CloudBackupTable : Table("cloud_backups") {
     val id = integer("id").autoIncrement()
@@ -39,6 +61,6 @@ fun Application.configureDatabases(testDb: Database? = null) {
 
     // 启动时自动建表
     transaction(database) {
-        SchemaUtils.createMissingTablesAndColumns(PingTable, CloudBackupTable)
+        SchemaUtils.createMissingTablesAndColumns(PingTable, UsersTable, RefreshTokensTable, CloudBackupTable)
     }
 }
