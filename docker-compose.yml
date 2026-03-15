@@ -28,8 +28,6 @@ services:
     env_file: .env
     ports:
       - "8080:8080"
-    volumes:
-      - ./uploads:/app/uploads
     networks:
       - mushroom-network
     restart: on-failure

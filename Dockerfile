@@ -7,14 +7,14 @@ WORKDIR /app
 COPY build/libs/*.jar app.jar
 
 # Install curl for health checks
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl && \
+    rm -rf /app/uploads && \
+    mkdir -p /app/uploads/avatars
 
 # Create a non-root user for security
 RUN addgroup -g 1000 mushroom && \
     adduser -D -u 1000 -G mushroom mushroom && \
-    chown -R mushroom:mushroom /app && \
-    mkdir -p /app/uploads/avatars && \
-    chown -R mushroom:mushroom /app/uploads
+    chown -R mushroom:mushroom /app
 
 USER mushroom
 

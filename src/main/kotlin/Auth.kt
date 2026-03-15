@@ -254,7 +254,7 @@ fun Application.configureAuthRoutes() {
                         val uploadDirPath = application.environment.config.property("upload.dir").getString()
                         val maxSize = application.environment.config.property("upload.maxSizeBytes").getString().toLong()
                         val baseUrl = application.environment.config.property("upload.baseUrl").getString()
-                        val uploadDir = File(uploadDirPath).also { it.mkdirs() }
+                        val uploadDir = File("/app", uploadDirPath).also { it.mkdirs() }
 
                         val multipart = call.receiveMultipart()
                         var savedFileName: String? = null
