@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "bash": {
+      "allowed": true,
+      "description": "Allow bash command execution for Docker operations"
+    },
+    "docker": {
+      "allowed": true,
+      "description": "Allow Docker commands (build, run, compose, etc.)"
+    },
+    "edit": {
+      "allowed": true,
+      "description": "Allow file editing (excluding deletions)"
+    },
+    "write": {
+      "allowed": true,
+      "description": "Allow file writing"
+    }
+  },
+  "workspace": {
+    "name": "mushroom-server",
+    "description": "Mushroom Server v0.5.1 - Kotlin/Ktor Backend",
+    "type": "docker-compose"
+  }
+}

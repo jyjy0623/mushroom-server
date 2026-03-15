@@ -74,9 +74,14 @@ object FriendsTable : Table("friends") {
 
 fun Application.configureDatabases(testDb: Database? = null) {
     val database = testDb ?: run {
-        val url = environment.config.property("postgres.url").getString()
-        val user = environment.config.property("postgres.user").getString()
-        val password = environment.config.property("postgres.password").getString()
+        // 优先读取环境变量，其次读取配置文件
+        val url = System.getenv("POSTGRES_URL") ?: environment.config.property("postgres.url").getString()
+        val user = System.getenv("POSTGRES_USER") ?: environment.config.property("postgres.user").getString()
+        val password = System.getenv("POSTGRES_PASSWORD") ?: environment.config.property("postgres.password").getString()
+
+        log.info("Database config - URL: $url, User: $user")
+        log.info("Env POSTGRES_URL: ${System.getenv("POSTGRES_URL")}")
+
         Database.connect(
             url = url,
             driver = "org.postgresql.Driver",

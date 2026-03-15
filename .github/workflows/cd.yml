@@ -109,9 +109,11 @@ jobs:
           docker run -d \
             --name mushroom-server \
             -p 8080:8080 \
-            -e DB_URL="jdbc:postgresql://172.17.0.2:5432/mushroom" \
-            -e DB_USER="postgres" \
-            -e DB_PASSWORD="${DB_PASSWORD}" \
+            -e POSTGRES_URL="jdbc:postgresql://mushroom-postgres:5432/mushroom" \
+            -e POSTGRES_USER="mushroom" \
+            -e POSTGRES_PASSWORD="${DB_PASSWORD}" \
+            -e JWT_SECRET="${JWT_SECRET}" \
+            -e UPLOAD_BASE_URL="${UPLOAD_BASE_URL:-http://localhost:8080}" \
             --health-cmd='curl -f http://localhost:8080/health || exit 1' \
             --health-interval=30s \
             --health-timeout=5s \

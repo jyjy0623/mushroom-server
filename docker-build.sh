@@ -11,7 +11,12 @@ echo -e "${YELLOW}Building mushroom-server Docker image...${NC}"
 
 cd /root/workspace/mushroom-server
 
+# Build the JAR file using gradle
+echo -e "${YELLOW}Compiling JAR...${NC}"
+./gradlew clean build -x test --no-daemon
+
 # Build the Docker image
+echo -e "${YELLOW}Building Docker image...${NC}"
 docker build -t mushroom-server:latest -f Dockerfile .
 
 if [ $? -eq 0 ]; then
