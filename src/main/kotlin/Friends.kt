@@ -280,9 +280,9 @@ fun Application.configureFriendRoutes() {
                     }
 
                     when (result) {
-                        "not_found" -> call.respond(HttpStatusCode.NotFound, mapOf("error" to "申请不存在或已处理"))
-                        "accepted" -> call.respond(mapOf("success" to true, "message" to "已同意好友申请"))
-                        "rejected" -> call.respond(mapOf("success" to true, "message" to "已拒绝好友申请"))
+                        "not_found" -> call.respond(HttpStatusCode.NotFound, AddFriendResponse(false, "申请不存在或已处理"))
+                        "accepted" -> call.respond(AddFriendResponse(true, "已同意好友申请"))
+                        "rejected" -> call.respond(AddFriendResponse(true, "已拒绝好友申请"))
                     }
                 }
 
@@ -329,7 +329,7 @@ fun Application.configureFriendRoutes() {
                         }
                     }
 
-                    call.respond(mapOf("success" to true))
+                    call.respond(AddFriendResponse(true, "已删除好友"))
                 }
 
                 // GET /friend/{targetUserId}/stats — 查看好友数据统计
