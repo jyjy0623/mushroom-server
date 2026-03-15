@@ -26,6 +26,15 @@ data class FriendInfo(val userId: Int, val nickname: String, val maskedPhone: St
 @Serializable
 data class FriendListResponse(val friends: List<FriendInfo>)
 
+@Serializable
+data class FriendStatsResponse(
+    val userId: Int,
+    val nickname: String,
+    val bestScore: Int? = null,
+    val globalRank: Int? = null,
+    val gameType: String
+)
+
 // --- Helper ---
 
 private fun maskPhone(phone: String): String {
@@ -162,6 +171,72 @@ fun Application.configureFriendRoutes() {
                     }
 
                     call.respond(mapOf("success" to true))
+                }
+
+                // GET /friend/{targetUserId}/stats — 查看好友数据统计
+                get("/{targetUserId}/stats") {
+                    val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+                    val targetId = call.parameters["targetUserId"]?.toIntOrNull()
+                    if (targetId == null) {
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "无效的用户 ID"))
+                        return@get
+                    }
+
+                    val gameType = call.request.queryParameters["gameType"] ?: "runner"
+
+                    // 安全校验：验证是好友关系
+                    val isFriend = transaction {
+                        FriendsTable.selectAll()
+                            .where {
+                                (FriendsTable.userId eq userId) and
+                                        (FriendsTable.friendId eq targetId) and
+                                        (FriendsTable.status eq "accepted")
+                            }
+                            .count() > 0
+                    }
+                    if (!isFriend) {
+                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "非好友关系"))
+                        return@get
+                    }
+
+                    // 获取好友昵称
+                    val nickname = transaction {
+                        UsersTable.selectAll()
+                            .where { UsersTable.id eq targetId }
+                            .firstOrNull()?.get(UsersTable.nickname) ?: ""
+                    }
+
+                    // 查询最高分
+                    val scoreRow = transaction {
+                        LeaderboardTable.selectAll()
+                            .where {
+                                (LeaderboardTable.userId eq targetId) and
+                                        (LeaderboardTable.gameType eq gameType)
+                            }
+                            .firstOrNull()
+                    }
+
+                    val bestScore = scoreRow?.get(LeaderboardTable.score)
+                    val globalRank = if (bestScore != null) {
+                        transaction {
+                            LeaderboardTable.selectAll()
+                                .where {
+                                    (LeaderboardTable.gameType eq gameType) and
+                                            (LeaderboardTable.score greater bestScore)
+                                }
+                                .count().toInt() + 1
+                        }
+                    } else null
+
+                    call.respond(
+                        FriendStatsResponse(
+                            userId = targetId,
+                            nickname = nickname,
+                            bestScore = bestScore,
+                            globalRank = globalRank,
+                            gameType = gameType
+                        )
+                    )
                 }
             }
         }
