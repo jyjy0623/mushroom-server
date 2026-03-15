@@ -15,7 +15,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 // --- Data models ---
 
 @Serializable
-data class AddFriendRequest(val phone: String)
+data class AddFriendRequest(val phone: String, val message: String = "")
 
 @Serializable
 data class AddFriendResponse(val success: Boolean, val message: String)
@@ -25,6 +25,28 @@ data class FriendInfo(val userId: Int, val nickname: String, val maskedPhone: St
 
 @Serializable
 data class FriendListResponse(val friends: List<FriendInfo>)
+
+@Serializable
+data class FriendRequestInfo(
+    val id: Int,
+    val fromUserId: Int,
+    val nickname: String,
+    val maskedPhone: String,
+    val message: String,
+    val createdAt: Long
+)
+
+@Serializable
+data class FriendRequestListResponse(
+    val requests: List<FriendRequestInfo>,
+    val total: Int
+)
+
+@Serializable
+data class HandleRequestBody(val action: String) // "accept" / "reject"
+
+@Serializable
+data class PendingCountResponse(val count: Int)
 
 @Serializable
 data class FriendStatsResponse(
@@ -54,18 +76,18 @@ fun Application.configureFriendRoutes() {
         authenticate("auth-jwt") {
             route("/friend") {
 
-                // POST /friend/add — 通过手机号添加好友
+                // POST /friend/add — 发送好友申请（带留言）
                 post("/add") {
                     val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
                     val req = call.receive<AddFriendRequest>()
                     val phone = req.phone.trim()
+                    val reqMessage = req.message.trim().take(128)
 
                     if (!phone.matches(Regex("^1[3-9]\\d{9}$"))) {
                         call.respond(HttpStatusCode.BadRequest, AddFriendResponse(false, "手机号格式不正确"))
                         return@post
                     }
 
-                    // 查找目标用户
                     val targetUser = transaction {
                         UsersTable.selectAll()
                             .where { UsersTable.phone eq phone }
@@ -85,7 +107,7 @@ fun Application.configureFriendRoutes() {
                     val now = System.currentTimeMillis()
 
                     val result = transaction {
-                        // 检查是否已存在好友关系
+                        // 检查 A->B 是否已存在
                         val existing = FriendsTable.selectAll()
                             .where {
                                 (FriendsTable.userId eq userId) and (FriendsTable.friendId eq targetId)
@@ -93,42 +115,175 @@ fun Application.configureFriendRoutes() {
                             .firstOrNull()
 
                         if (existing != null) {
-                            return@transaction "already"
+                            return@transaction when (existing[FriendsTable.status]) {
+                                "accepted" -> "already_friend"
+                                "pending" -> "already_pending"
+                                else -> "already_friend"
+                            }
                         }
 
-                        // 直接添加为好友（双向 accepted）
-                        FriendsTable.insert {
-                            it[FriendsTable.userId] = userId
-                            it[friendId] = targetId
-                            it[status] = "accepted"
-                            it[createdAt] = now
-                        }
-
-                        // 检查对方是否也已添加我
-                        val reverse = FriendsTable.selectAll()
+                        // 检查 B->A 是否有 pending（对方先申请了我）
+                        val reverseRequest = FriendsTable.selectAll()
                             .where {
-                                (FriendsTable.userId eq targetId) and (FriendsTable.friendId eq userId)
+                                (FriendsTable.userId eq targetId) and
+                                        (FriendsTable.friendId eq userId) and
+                                        (FriendsTable.status eq "pending")
                             }
                             .firstOrNull()
 
-                        if (reverse == null) {
-                            FriendsTable.insert {
-                                it[FriendsTable.userId] = targetId
-                                it[friendId] = userId
+                        if (reverseRequest != null) {
+                            // 对方已申请过我 -> 直接双向 accepted
+                            FriendsTable.update({ FriendsTable.id eq reverseRequest[FriendsTable.id] }) {
                                 it[status] = "accepted"
+                            }
+                            FriendsTable.insert {
+                                it[FriendsTable.userId] = userId
+                                it[friendId] = targetId
+                                it[status] = "accepted"
+                                it[message] = reqMessage
                                 it[createdAt] = now
                             }
+                            return@transaction "auto_accepted"
                         }
 
-                        "added"
+                        // 常规：插入 pending 申请
+                        FriendsTable.insert {
+                            it[FriendsTable.userId] = userId
+                            it[friendId] = targetId
+                            it[status] = "pending"
+                            it[message] = reqMessage
+                            it[createdAt] = now
+                        }
+                        "pending_sent"
                     }
 
-                    val message = when (result) {
-                        "already" -> "已经是好友了"
-                        "added" -> "好友添加成功！"
-                        else -> "操作完成"
+                    val (success, msg) = when (result) {
+                        "already_friend" -> false to "已经是好友了"
+                        "already_pending" -> false to "已发送过申请，等待对方同意"
+                        "auto_accepted" -> true to "对方也向你发送了申请，已自动添加为好友！"
+                        "pending_sent" -> true to "好友申请已发送，等待对方同意"
+                        else -> false to "操作完成"
                     }
-                    call.respond(AddFriendResponse(success = result == "added", message = message))
+                    call.respond(AddFriendResponse(success = success, message = msg))
+                }
+
+                // GET /friend/requests — 获取收到的待处理好友申请
+                get("/requests") {
+                    val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+
+                    val requests = transaction {
+                        val pendingRows = FriendsTable.selectAll()
+                            .where {
+                                (FriendsTable.friendId eq userId) and (FriendsTable.status eq "pending")
+                            }
+                            .orderBy(FriendsTable.createdAt, SortOrder.DESC)
+                            .toList()
+
+                        val fromUserIds = pendingRows.map { it[FriendsTable.userId] }
+                        val usersMap = if (fromUserIds.isNotEmpty()) {
+                            UsersTable.selectAll()
+                                .where { UsersTable.id inList fromUserIds }
+                                .associate { it[UsersTable.id] to Pair(it[UsersTable.nickname], it[UsersTable.phone]) }
+                        } else emptyMap()
+
+                        pendingRows.map { row ->
+                            val fromId = row[FriendsTable.userId]
+                            val (nickname, phoneVal) = usersMap[fromId] ?: ("" to "")
+                            FriendRequestInfo(
+                                id = row[FriendsTable.id],
+                                fromUserId = fromId,
+                                nickname = nickname,
+                                maskedPhone = maskPhone(phoneVal),
+                                message = row[FriendsTable.message],
+                                createdAt = row[FriendsTable.createdAt]
+                            )
+                        }
+                    }
+
+                    call.respond(FriendRequestListResponse(requests = requests, total = requests.size))
+                }
+
+                // GET /friend/requests/count — 获取待处理申请数量
+                get("/requests/count") {
+                    val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+                    val count = transaction {
+                        FriendsTable.selectAll()
+                            .where {
+                                (FriendsTable.friendId eq userId) and (FriendsTable.status eq "pending")
+                            }
+                            .count().toInt()
+                    }
+                    call.respond(PendingCountResponse(count = count))
+                }
+
+                // POST /friend/requests/{id}/handle — 同意或拒绝好友申请
+                post("/requests/{id}/handle") {
+                    val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+                    val requestId = call.parameters["id"]?.toIntOrNull()
+                    if (requestId == null) {
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "无效的请求 ID"))
+                        return@post
+                    }
+
+                    val body = call.receive<HandleRequestBody>()
+                    if (body.action !in listOf("accept", "reject")) {
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "action 必须是 accept 或 reject"))
+                        return@post
+                    }
+
+                    val now = System.currentTimeMillis()
+
+                    val result = transaction {
+                        val request = FriendsTable.selectAll()
+                            .where {
+                                (FriendsTable.id eq requestId) and
+                                        (FriendsTable.friendId eq userId) and
+                                        (FriendsTable.status eq "pending")
+                            }
+                            .firstOrNull()
+                            ?: return@transaction "not_found"
+
+                        val fromUserId = request[FriendsTable.userId]
+
+                        if (body.action == "accept") {
+                            // 将 pending 改为 accepted
+                            FriendsTable.update({ FriendsTable.id eq requestId }) {
+                                it[status] = "accepted"
+                            }
+                            // 插入反向 accepted 记录
+                            val reverseExists = FriendsTable.selectAll()
+                                .where {
+                                    (FriendsTable.userId eq userId) and (FriendsTable.friendId eq fromUserId)
+                                }
+                                .firstOrNull()
+                            if (reverseExists == null) {
+                                FriendsTable.insert {
+                                    it[FriendsTable.userId] = userId
+                                    it[friendId] = fromUserId
+                                    it[FriendsTable.status] = "accepted"
+                                    it[message] = ""
+                                    it[createdAt] = now
+                                }
+                            } else {
+                                FriendsTable.update({
+                                    (FriendsTable.userId eq userId) and (FriendsTable.friendId eq fromUserId)
+                                }) {
+                                    it[status] = "accepted"
+                                }
+                            }
+                            "accepted"
+                        } else {
+                            // reject: 删除该 pending 记录
+                            FriendsTable.deleteWhere { FriendsTable.id eq requestId }
+                            "rejected"
+                        }
+                    }
+
+                    when (result) {
+                        "not_found" -> call.respond(HttpStatusCode.NotFound, mapOf("error" to "申请不存在或已处理"))
+                        "accepted" -> call.respond(mapOf("success" to true, "message" to "已同意好友申请"))
+                        "rejected" -> call.respond(mapOf("success" to true, "message" to "已拒绝好友申请"))
+                    }
                 }
 
                 // GET /friend/list — 获取好友列表
@@ -188,7 +343,6 @@ fun Application.configureFriendRoutes() {
 
                     val gameType = call.request.queryParameters["gameType"] ?: "runner"
 
-                    // 安全校验：验证是好友关系
                     val isFriend = transaction {
                         FriendsTable.selectAll()
                             .where {
@@ -203,14 +357,12 @@ fun Application.configureFriendRoutes() {
                         return@get
                     }
 
-                    // 获取好友昵称
                     val nickname = transaction {
                         UsersTable.selectAll()
                             .where { UsersTable.id eq targetId }
                             .firstOrNull()?.get(UsersTable.nickname) ?: ""
                     }
 
-                    // 查询最高分
                     val scoreRow = transaction {
                         LeaderboardTable.selectAll()
                             .where {
@@ -232,7 +384,6 @@ fun Application.configureFriendRoutes() {
                         }
                     } else null
 
-                    // 查询学习/蘑菇统计
                     val userStats = transaction {
                         UserStatsTable.selectAll()
                             .where { UserStatsTable.userId eq targetId }

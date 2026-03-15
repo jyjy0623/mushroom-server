@@ -64,6 +64,7 @@ object FriendsTable : Table("friends") {
     val userId = integer("user_id").references(UsersTable.id)
     val friendId = integer("friend_id").references(UsersTable.id)
     val status = varchar("status", 16) // "pending" / "accepted"
+    val message = varchar("message", 128).default("") // 好友申请留言
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 
