@@ -10,6 +10,8 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.utils.io.*
+import io.ktor.utils.io.jvm.javaio.*
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -262,9 +264,8 @@ fun Application.configureAuthRoutes() {
                             } else {
                                 val fileName = "${userId}_${System.currentTimeMillis()}.$ext"
                                 val file = File(uploadDir, fileName)
-                                part.streamProvider().use { input ->
-                                    file.outputStream().buffered().use { output -> input.copyTo(output) }
-                                }
+                                val bytes = part.provider().toInputStream().readBytes()
+                                file.writeBytes(bytes)
                                 if (file.length() > maxSize) {
                                     file.delete()
                                     errorMsg = "图片大小不能超过2MB"
