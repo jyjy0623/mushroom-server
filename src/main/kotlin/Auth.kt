@@ -19,6 +19,8 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
 import java.util.*
 
+private val log = org.slf4j.LoggerFactory.getLogger("Auth")
+
 // --- Request / Response models ---
 
 @Serializable
@@ -246,76 +248,89 @@ fun Application.configureAuthRoutes() {
                 // POST /user/avatar — 上传头像图片
                 post("/avatar") {
                     val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
-                    val uploadDirPath = application.environment.config.property("upload.dir").getString()
-                    val maxSize = application.environment.config.property("upload.maxSizeBytes").getString().toLong()
-                    val baseUrl = application.environment.config.property("upload.baseUrl").getString()
-                    val uploadDir = File(uploadDirPath).also { it.mkdirs() }
+                    log.info("Avatar upload started: userId={}", userId)
 
-                    val multipart = call.receiveMultipart()
-                    var savedFileName: String? = null
-                    var errorMsg: String? = null
-                    val allowedExts = setOf("jpg", "jpeg", "png", "webp")
+                    try {
+                        val uploadDirPath = application.environment.config.property("upload.dir").getString()
+                        val maxSize = application.environment.config.property("upload.maxSizeBytes").getString().toLong()
+                        val baseUrl = application.environment.config.property("upload.baseUrl").getString()
+                        val uploadDir = File(uploadDirPath).also { it.mkdirs() }
 
-                    multipart.forEachPart { part ->
-                        if (part is PartData.FileItem && part.name == "avatar" && savedFileName == null && errorMsg == null) {
-                            val ext = (part.originalFileName?.substringAfterLast('.', "jpg") ?: "jpg").lowercase()
-                            if (ext !in allowedExts) {
-                                errorMsg = "不支持的图片格式，仅支持 jpg/png/webp"
-                            } else {
-                                val fileName = "${userId}_${System.currentTimeMillis()}.$ext"
-                                val file = File(uploadDir, fileName)
-                                val bytes = part.provider().toInputStream().readBytes()
-                                file.writeBytes(bytes)
-                                if (file.length() > maxSize) {
-                                    file.delete()
-                                    errorMsg = "图片大小不能超过2MB"
+                        val multipart = call.receiveMultipart()
+                        var savedFileName: String? = null
+                        var errorMsg: String? = null
+                        val allowedExts = setOf("jpg", "jpeg", "png", "webp")
+
+                        multipart.forEachPart { part ->
+                            if (part is PartData.FileItem && part.name == "avatar" && savedFileName == null && errorMsg == null) {
+                                val ext = (part.originalFileName?.substringAfterLast('.', "jpg") ?: "jpg").lowercase()
+                                if (ext !in allowedExts) {
+                                    errorMsg = "不支持的图片格式，仅支持 jpg/png/webp"
+                                    log.warn("Avatar upload rejected: userId={}, reason=unsupported format, ext={}", userId, ext)
                                 } else {
-                                    savedFileName = fileName
+                                    val fileName = "${userId}_${System.currentTimeMillis()}.$ext"
+                                    val file = File(uploadDir, fileName)
+                                    val bytes = part.provider().toInputStream().readBytes()
+                                    file.writeBytes(bytes)
+                                    if (file.length() > maxSize) {
+                                        file.delete()
+                                        errorMsg = "图片大小不能超过2MB"
+                                        log.warn("Avatar upload rejected: userId={}, reason=file too large, size={}", userId, bytes.size)
+                                    } else {
+                                        savedFileName = fileName
+                                        log.info("Avatar file saved: userId={}, fileName={}, size={}", userId, fileName, bytes.size)
+                                    }
                                 }
                             }
+                            part.dispose()
                         }
-                        part.dispose()
-                    }
 
-                    if (errorMsg != null) {
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to errorMsg!!))
-                        return@post
-                    }
-                    if (savedFileName == null) {
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "请上传图片文件"))
-                        return@post
-                    }
-
-                    val avatarUrl = "$baseUrl/uploads/avatars/$savedFileName"
-
-                    // 删除旧头像文件
-                    val oldUrl = transaction {
-                        UsersTable.selectAll().where { UsersTable.id eq userId }.firstOrNull()
-                            ?.get(UsersTable.avatarUrl)
-                    }
-                    if (!oldUrl.isNullOrEmpty() && oldUrl.contains("/uploads/avatars/")) {
-                        val oldFileName = oldUrl.substringAfterLast('/')
-                        File(uploadDir, oldFileName).let { if (it.exists()) it.delete() }
-                    }
-
-                    // 更新数据库
-                    transaction {
-                        UsersTable.update({ UsersTable.id eq userId }) {
-                            it[UsersTable.avatarUrl] = avatarUrl
-                            it[updatedAt] = System.currentTimeMillis()
+                        if (errorMsg != null) {
+                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to errorMsg!!))
+                            return@post
                         }
-                    }
-                    val updated = transaction {
-                        UsersTable.selectAll().where { UsersTable.id eq userId }.first()
-                    }
-                    call.respond(
-                        UserProfile(
-                            id = updated[UsersTable.id],
-                            phone = updated[UsersTable.phone],
-                            nickname = updated[UsersTable.nickname],
-                            avatarUrl = updated[UsersTable.avatarUrl]
+                        if (savedFileName == null) {
+                            log.warn("Avatar upload rejected: userId={}, reason=no avatar file part", userId)
+                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "请上传图片文件"))
+                            return@post
+                        }
+
+                        val avatarUrl = "$baseUrl/uploads/avatars/$savedFileName"
+
+                        // 删除旧头像文件
+                        val oldUrl = transaction {
+                            UsersTable.selectAll().where { UsersTable.id eq userId }.firstOrNull()
+                                ?.get(UsersTable.avatarUrl)
+                        }
+                        if (!oldUrl.isNullOrEmpty() && oldUrl.contains("/uploads/avatars/")) {
+                            val oldFileName = oldUrl.substringAfterLast('/')
+                            File(uploadDir, oldFileName).let { if (it.exists()) it.delete() }
+                        }
+
+                        // 更新数据库
+                        transaction {
+                            UsersTable.update({ UsersTable.id eq userId }) {
+                                it[UsersTable.avatarUrl] = avatarUrl
+                                it[updatedAt] = System.currentTimeMillis()
+                            }
+                        }
+                        val updated = transaction {
+                            UsersTable.selectAll().where { UsersTable.id eq userId }.first()
+                        }
+
+                        log.info("Avatar upload completed: userId={}, avatarUrl={}", userId, avatarUrl)
+                        call.respond(
+                            UserProfile(
+                                id = updated[UsersTable.id],
+                                phone = updated[UsersTable.phone],
+                                nickname = updated[UsersTable.nickname],
+                                avatarUrl = updated[UsersTable.avatarUrl]
+                            )
                         )
-                    )
+                    } catch (e: Exception) {
+                        log.error("Avatar upload failed unexpectedly: userId={}", userId, e)
+                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "服务器内部错误"))
+                    }
                 }
             }
         }
