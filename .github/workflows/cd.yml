@@ -91,49 +91,77 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          UPLOAD_BASE_URL: ${{ secrets.UPLOAD_BASE_URL || 'http://localhost:8080' }}
         run: |
           mkdir -p ~/.ssh
           echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p $DEPLOY_PORT $DEPLOY_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
 
+          # 传输镜像到远程服务器
+          scp -i ~/.ssh/deploy_key -P $DEPLOY_PORT /tmp/image.tar $DEPLOY_USER@$DEPLOY_HOST:/tmp/
+
+          # 在远程服务器上执行部署
           ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
           set -e
-          echo "Deploying mushroom-server..."
+          echo "🍄 Deploying mushroom-server..."
 
-          # Stop old container
-          docker stop mushroom-server || true
-          docker rm mushroom-server || true
+          # 加载镜像
+          docker load --input /tmp/image.tar
+          IMAGE_ID=$(docker images --format "{{.ID}}" mushroom-server | head -1)
+          docker tag $IMAGE_ID mushroom-server:latest
 
-          # Start new container
-          docker run -d \
-            --name mushroom-server \
-            -p 8080:8080 \
-            -e POSTGRES_URL="jdbc:postgresql://mushroom-postgres:5432/mushroom" \
-            -e POSTGRES_USER="mushroom" \
-            -e POSTGRES_PASSWORD="${DB_PASSWORD}" \
-            -e JWT_SECRET="${JWT_SECRET}" \
-            -e UPLOAD_BASE_URL="${UPLOAD_BASE_URL:-http://localhost:8080}" \
-            --health-cmd='curl -f http://localhost:8080/health || exit 1' \
-            --health-interval=30s \
-            --health-timeout=5s \
-            --health-retries=3 \
-            mushroom-server:${{ github.sha }}
+          # 更新 .env 文件
+          cat > /root/workspace/mushroom-server/.env << 'ENVEOF'
+          POSTGRES_URL=jdbc:postgresql://mushroom-postgres:5432/mushroom
+          POSTGRES_USER=mushroom
+          POSTGRES_PASSWORD=$DB_PASSWORD
+          JWT_SECRET=$JWT_SECRET
+          UPLOAD_BASE_URL=$UPLOAD_BASE_URL
+          ENVEOF
 
-          # Wait for container to be healthy
-          echo "Waiting for container to be healthy..."
+          cd /root/workspace/mushroom-server
+
+          # 停止旧容器
+          docker-compose -f docker-compose.yml down || true
+
+          # 启动新容器
+          docker-compose -f docker-compose.yml up -d
+
+          # 等待服务就绪
+          echo "Waiting for services to be ready..."
+          sleep 5
+
+          # 检查 PostgreSQL
           for i in {1..30}; do
-            if docker inspect mushroom-server --format='{{.State.Health.Status}}' | grep -q healthy; then
-              echo "Container is healthy!"
-              exit 0
+            if docker exec mushroom-postgres pg_isready -U mushroom > /dev/null 2>&1; then
+              echo "✅ PostgreSQL is ready"
+              break
             fi
-            echo "Attempt $i/30: Container not ready yet..."
-            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "❌ PostgreSQL failed to start"
+              docker logs mushroom-postgres | tail -20
+              exit 1
+            fi
+            sleep 1
           done
 
-          echo "Container failed to become healthy"
-          docker logs mushroom-server
-          exit 1
+          # 检查应用健康状态
+          for i in {1..30}; do
+            if docker inspect mushroom-server --format='{{.State.Health.Status}}' 2>/dev/null | grep -q healthy; then
+              echo "✅ Application is healthy"
+              exit 0
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Application failed to become healthy"
+              docker logs mushroom-server | tail -50
+              exit 1
+            fi
+            echo "Attempt $i/30: Waiting for application..."
+            sleep 2
+          done
           EOF
 
       - name: Verify deployment
@@ -150,7 +178,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST << 'EOF'
           echo "Verifying deployment..."
           curl -f http://localhost:8080/health || exit 1
-          echo "Deployment verified successfully!"
+          echo "✅ Deployment verified successfully!"
           EOF
 
       - name: Notify deployment
