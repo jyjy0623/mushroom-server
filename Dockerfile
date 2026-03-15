@@ -12,7 +12,9 @@ RUN apk add --no-cache curl
 # Create a non-root user for security
 RUN addgroup -g 1000 mushroom && \
     adduser -D -u 1000 -G mushroom mushroom && \
-    chown -R mushroom:mushroom /app
+    chown -R mushroom:mushroom /app && \
+    mkdir -p /app/uploads/avatars && \
+    chown -R mushroom:mushroom /app/uploads
 
 USER mushroom
 
