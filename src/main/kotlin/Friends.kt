@@ -32,7 +32,11 @@ data class FriendStatsResponse(
     val nickname: String,
     val bestScore: Int? = null,
     val globalRank: Int? = null,
-    val gameType: String
+    val gameType: String,
+    val currentStreak: Int = 0,
+    val longestStreak: Int = 0,
+    val totalCheckins: Int = 0,
+    val totalMushroomPoints: Int = 0
 )
 
 // --- Helper ---
@@ -228,13 +232,24 @@ fun Application.configureFriendRoutes() {
                         }
                     } else null
 
+                    // 查询学习/蘑菇统计
+                    val userStats = transaction {
+                        UserStatsTable.selectAll()
+                            .where { UserStatsTable.userId eq targetId }
+                            .firstOrNull()
+                    }
+
                     call.respond(
                         FriendStatsResponse(
                             userId = targetId,
                             nickname = nickname,
                             bestScore = bestScore,
                             globalRank = globalRank,
-                            gameType = gameType
+                            gameType = gameType,
+                            currentStreak = userStats?.get(UserStatsTable.currentStreak) ?: 0,
+                            longestStreak = userStats?.get(UserStatsTable.longestStreak) ?: 0,
+                            totalCheckins = userStats?.get(UserStatsTable.totalCheckins) ?: 0,
+                            totalMushroomPoints = userStats?.get(UserStatsTable.totalMushroomPoints) ?: 0
                         )
                     )
                 }

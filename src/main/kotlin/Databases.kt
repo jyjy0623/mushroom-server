@@ -72,6 +72,18 @@ object FriendsTable : Table("friends") {
     }
 }
 
+// 用户统计表：客户端同步的学习/蘑菇汇总数据
+object UserStatsTable : Table("user_stats") {
+    val id = integer("id").autoIncrement()
+    val userId = integer("user_id").references(UsersTable.id).uniqueIndex()
+    val currentStreak = integer("current_streak").default(0)
+    val longestStreak = integer("longest_streak").default(0)
+    val totalCheckins = integer("total_checkins").default(0)
+    val totalMushroomPoints = integer("total_mushroom_points").default(0)
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 fun Application.configureDatabases(testDb: Database? = null) {
     val database = testDb ?: run {
         // 优先读取环境变量，其次读取配置文件
@@ -92,6 +104,6 @@ fun Application.configureDatabases(testDb: Database? = null) {
 
     // 启动时自动建表
     transaction(database) {
-        SchemaUtils.createMissingTablesAndColumns(PingTable, UsersTable, RefreshTokensTable, CloudBackupTable, LeaderboardTable, FriendsTable)
+        SchemaUtils.createMissingTablesAndColumns(PingTable, UsersTable, RefreshTokensTable, CloudBackupTable, LeaderboardTable, FriendsTable, UserStatsTable)
     }
 }

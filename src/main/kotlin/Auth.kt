@@ -63,6 +63,14 @@ data class UpdateProfileRequest(
     val avatarUrl: String? = null
 )
 
+@Serializable
+data class SyncStatsRequest(
+    val currentStreak: Int,
+    val longestStreak: Int,
+    val totalCheckins: Int,
+    val totalMushroomPoints: Int
+)
+
 // --- JWT Authentication plugin ---
 
 fun Application.configureAuth() {
@@ -331,6 +339,40 @@ fun Application.configureAuthRoutes() {
                         log.error("Avatar upload failed unexpectedly: userId={}", userId, e)
                         call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "服务器内部错误"))
                     }
+                }
+
+                // POST /user/stats — 客户端同步学习/蘑菇统计数据
+                post("/stats") {
+                    val userId = call.principal<JWTPrincipal>()!!.payload.getClaim("userId").asInt()
+                    val req = call.receive<SyncStatsRequest>()
+                    val now = System.currentTimeMillis()
+
+                    transaction {
+                        val existing = UserStatsTable.selectAll()
+                            .where { UserStatsTable.userId eq userId }
+                            .firstOrNull()
+
+                        if (existing != null) {
+                            UserStatsTable.update({ UserStatsTable.userId eq userId }) {
+                                it[currentStreak] = req.currentStreak
+                                it[longestStreak] = req.longestStreak
+                                it[totalCheckins] = req.totalCheckins
+                                it[totalMushroomPoints] = req.totalMushroomPoints
+                                it[updatedAt] = now
+                            }
+                        } else {
+                            UserStatsTable.insert {
+                                it[UserStatsTable.userId] = userId
+                                it[currentStreak] = req.currentStreak
+                                it[longestStreak] = req.longestStreak
+                                it[totalCheckins] = req.totalCheckins
+                                it[totalMushroomPoints] = req.totalMushroomPoints
+                                it[updatedAt] = now
+                            }
+                        }
+                    }
+
+                    call.respond(mapOf("success" to true))
                 }
             }
         }
